@@ -1,4 +1,6 @@
-use crate::{ClientId, OrderId, Timestamp};
+use tokio::sync::oneshot;
+
+use crate::{ClientId, Order, OrderId, Timestamp, book::BookError};
 
 pub type Price = u64; // in ticks
 pub type Qty = u64; // in lots
@@ -27,6 +29,32 @@ pub struct Trade {
     pub price: Price,
     pub qty: Qty,
     pub timestamp: Timestamp,
+}
+
+#[derive(Debug)]
+pub enum Command {
+    PlaceOrder {
+        order: Order,
+        response: oneshot::Sender<CommandResult>,
+    },
+    CancelOrder {
+        id: OrderId,
+        response: oneshot::Sender<CommandResult>,
+    },
+}
+
+#[derive(Debug)]
+pub enum CommandResult {
+    Placed { trades: Vec<Trade> },
+    Canceled { order: Order },
+    Error(BookError),
+}
+
+#[derive(Debug, Clone)]
+pub enum Event {
+    OrderPlaced { order: Order },
+    OrderCanceled { order_id: OrderId },
+    Trade { trade: Trade },
 }
 
 pub fn parse_price(s: &str, tick_decimals: u32) -> Result<Price, PriceError> {

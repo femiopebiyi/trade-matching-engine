@@ -24,6 +24,12 @@ pub enum BookError {
     PriceMisaligned,       // price doesn't fit the tick grid
 }
 
+#[derive(Debug)]
+pub struct ExecuteResult {
+    pub trades: Vec<Trade>,
+    pub resting_order: Option<Order>,
+}
+
 impl OrderBook {
     pub fn new(symbol: String, tick_decimals: u32) -> Self {
         Self {
@@ -95,14 +101,14 @@ impl OrderBook {
         self.asks.first_key_value().map(|(&price, _)| price)
     }
 
-    fn opposite_side_map(&mut self, side: Side) -> &mut BTreeMap<Price, VecDeque<Order>> {
+    fn _opposite_side_map(&mut self, side: Side) -> &mut BTreeMap<Price, VecDeque<Order>> {
         match side {
             Side::Buy => &mut self.asks,
             Side::Sell => &mut self.bids,
         }
     }
 
-    pub fn execute(&mut self, mut order: Order) -> Vec<Trade> {
+    pub fn execute(&mut self, mut order: Order) -> ExecuteResult {
         let mut trades = Vec::new();
 
         // THE MAIN LOOP: keep matching until the incoming order is empty
@@ -205,11 +211,18 @@ impl OrderBook {
 
         // 5. After the loop: if the order is a Limit with remaining_qty > 0,
         //    it rests. Call self.add(order). (Market orders just vanish.)
-        if order.remaining_qty > 0 && order.order_type == OrderType::Limit {
+        let resting_order = if order.remaining_qty > 0 && order.order_type == OrderType::Limit {
+            let resting = order.clone();
             let _ = self.add(order);
-        }
+            Some(resting)
+        } else {
+            None
+        };
 
-        trades
+        ExecuteResult {
+            trades,
+            resting_order,
+        }
     }
 }
 
@@ -335,9 +348,9 @@ mod tests {
 
         assert_eq!(book.best_bid().unwrap(), 100);
         assert_eq!(book.best_ask(), None);
-        assert_eq!(trade2.len(), 1);
-        assert_eq!(trade2[0].qty, 5);
-        assert_eq!(trade2[0].price, 100);
+        assert_eq!(trade2.trades.len(), 1);
+        assert_eq!(trade2.trades[0].qty, 5);
+        assert_eq!(trade2.trades[0].price, 100);
     }
 
     #[test]
@@ -359,7 +372,7 @@ mod tests {
 
         assert!(book.asks.is_empty());
         assert!(book.bids.is_empty());
-        assert_eq!(trade3.len(), 2);
+        assert_eq!(trade3.trades.len(), 2);
     }
 
     #[test]
@@ -379,7 +392,7 @@ mod tests {
 
         assert_eq!(book.best_ask(), Some(105));
         assert_eq!(book.best_bid(), Some(100));
-        assert!(trade1.is_empty() && trade2.is_empty());
+        assert!(trade1.trades.is_empty() && trade2.trades.is_empty());
     }
 
     #[test]
@@ -398,8 +411,8 @@ mod tests {
         println!("{:#?}", trade2);
 
         assert_eq!(book.best_bid(), None);
-        assert_eq!(trade2.len(), 1);
-        assert_eq!(trade2[0].qty, 5);
+        assert_eq!(trade2.trades.len(), 1);
+        assert_eq!(trade2.trades[0].qty, 5);
     }
 
     #[test]
@@ -417,8 +430,8 @@ mod tests {
         println!("{:#?}", trade2);
 
         assert_eq!(book.best_bid(), None);
-        assert_eq!(trade2.len(), 1);
-        assert_eq!(trade2[0].qty, 10)
+        assert_eq!(trade2.trades.len(), 1);
+        assert_eq!(trade2.trades[0].qty, 10)
     }
 
     #[test]
@@ -440,7 +453,7 @@ mod tests {
         println!("{:#?}", trade2);
         println!("{:#?}", trade3);
 
-        assert_eq!(trade3[0].seller_client_id, 12);
+        assert_eq!(trade3.trades[0].seller_client_id, 12);
         assert!(book.order_index.contains_key(&2)); // Order B still resting
         assert!(!book.order_index.contains_key(&1)); // Order A gone
     }
