@@ -1,21 +1,25 @@
+use thiserror::Error;
 use tokio::sync::oneshot;
 
-use crate::{ClientId, Order, OrderId, Timestamp, book::BookError};
+use crate::{ClientId, Order, OrderId, OrderType, Timestamp, book::BookError};
 
 pub type Price = u64; // in ticks
 pub type Qty = u64; // in lots
 pub type TradeId = u64;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 pub enum Side {
     Buy,
     Sell,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum PriceError {
+    #[error("invalid price format")]
     InvalidFormat,
+    #[error("price overflowed")]
     Overflow,
+    #[error("too many decimal places for the configured tick size")]
     TooManyDecimals,
 }
 
@@ -41,20 +45,89 @@ pub enum Command {
         id: OrderId,
         response: oneshot::Sender<CommandResult>,
     },
+    GetBook {
+        response: oneshot::Sender<CommandResult>,
+    },
+    GetTrades {
+        response: oneshot::Sender<CommandResult>,
+    },
 }
 
 #[derive(Debug)]
 pub enum CommandResult {
-    Placed { trades: Vec<Trade> },
-    Canceled { order: Order },
+    Placed {
+        order_id: OrderId,
+        trades: Vec<Trade>,
+    },
+    Canceled {
+        order: Order,
+    },
+    Book(BookSnapshot),
+    Trades(Vec<Trade>),
     Error(BookError),
 }
 
 #[derive(Debug, Clone)]
 pub enum Event {
+    OrderReceived { order: Order },
     OrderPlaced { order: Order },
     OrderCanceled { order_id: OrderId },
     Trade { trade: Trade },
+}
+
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Deserialize)]
+pub struct PlaceOrderRequest {
+    pub client_id: ClientId,
+    pub side: Side,            // "Buy" or "Sell"
+    pub order_type: OrderType, // "Limit" or "Market"
+    pub price: String,         // "103.57" — parsed via parse_price
+    pub qty: Qty,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PlaceOrderResponse {
+    pub order_id: OrderId,
+    pub trades: Vec<TradeResponse>,
+    pub status: String, // "filled", "partial", "resting"
+}
+
+#[derive(Debug, Serialize)]
+pub struct TradeResponse {
+    pub id: TradeId,
+    pub buyer_order_id: OrderId,
+    pub seller_order_id: OrderId,
+    pub price: String, // formatted back from ticks
+    pub qty: Qty,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BookLevel {
+    pub price: Price,
+    pub total_qty: Qty,
+    pub order_count: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BookLevelResponse {
+    pub price: String,
+    pub total_qty: Qty,
+    pub order_count: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BookSnapshotResponse {
+    pub symbol: String,
+    pub bids: Vec<BookLevelResponse>,
+    pub asks: Vec<BookLevelResponse>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BookSnapshot {
+    pub symbol: String,
+    pub bids: Vec<BookLevel>,
+    pub asks: Vec<BookLevel>,
 }
 
 pub fn parse_price(s: &str, tick_decimals: u32) -> Result<Price, PriceError> {
@@ -103,6 +176,18 @@ pub fn parse_price(s: &str, tick_decimals: u32) -> Result<Price, PriceError> {
         .ok_or(PriceError::Overflow)?)
     .checked_add(fraction)
     .ok_or(PriceError::Overflow)?)
+}
+
+pub fn format_price(ticks: Price, tick_decimals: u32) -> String {
+    let scale = 10u64.pow(tick_decimals);
+    let whole = ticks / scale;
+    let frac = ticks % scale;
+    format!(
+        "{}.{:0>width$}",
+        whole,
+        frac,
+        width = tick_decimals as usize
+    )
 }
 
 #[cfg(test)]

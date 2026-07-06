@@ -1,48 +1,45 @@
-use matching_engine::*;
-use tokio::sync::{broadcast, mpsc, oneshot};
+use std::sync::{Arc, atomic::AtomicU64};
+
+use matching_engine::{AppState, Command, Engine, Event, OrderBook, Writer, router};
+use sqlx::postgres::PgPoolOptions;
+use tokio::sync::{broadcast, mpsc};
 
 #[tokio::main]
 async fn main() {
-    // Create channels
+    let database_url = std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "postgres://localhost:5432/exchange".to_string());
+
+    let pool = PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&database_url)
+        .await
+        .expect("failed to connect to database");
+
+    // Run schema
+    // sqlx::query(include_str!("../schema.sql"))
+    //     .execute(&pool)
+    //     .await
+    //     .expect("failed to run schema");
+
     let (cmd_tx, cmd_rx) = mpsc::channel::<Command>(1024);
-    let (evt_tx, mut evt_rx) = broadcast::channel::<Event>(1024);
+    let (evt_tx, _) = broadcast::channel::<Event>(1024);
 
-    // Create the book and engine
-    let book = OrderBook::new("EUR/USD".to_string(), 2);
+    // Writer subscribes to events
+    let writer = Writer::new(pool.clone(), evt_tx.subscribe());
+    tokio::spawn(writer.run());
+
+    let book = OrderBook::new("SOL/USDC".to_string(), 2);
     let engine = Engine::new(book, cmd_rx, evt_tx.clone());
-
-    // Spawn the engine task
     tokio::spawn(engine.run());
 
-    // Spawn a listener that prints every event
-    tokio::spawn(async move {
-        while let Ok(evt) = evt_rx.recv().await {
-            println!("EVENT: {:?}", evt);
-        }
+    let state = Arc::new(AppState {
+        cmd_tx,
+        tick_decimals: 2,
+        next_order_id: AtomicU64::new(1),
     });
+    let app = router(state);
 
-    // Command 1: place a sell limit — should rest (no buyers yet)
-    let (r1, rx1) = oneshot::channel();
-    cmd_tx
-        .send(Command::PlaceOrder {
-            order: Order::new(1, 12, Side::Sell, OrderType::Limit, 100, 10),
-            response: r1,
-        })
-        .await
-        .unwrap();
-    println!("RESULT 1: {:?}", rx1.await);
-
-    // Command 2: place a buy limit at same price — should match
-    let (r2, rx2) = oneshot::channel();
-    cmd_tx
-        .send(Command::PlaceOrder {
-            order: Order::new(2, 13, Side::Buy, OrderType::Limit, 100, 10),
-            response: r2,
-        })
-        .await
-        .unwrap();
-    println!("RESULT 2: {:?}", rx2.await);
-
-    // Give the event listener a moment to print
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+    println!("listening on :3000");
+    axum::serve(listener, app).await.unwrap();
 }

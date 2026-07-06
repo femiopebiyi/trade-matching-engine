@@ -1,10 +1,11 @@
 use std::{
     cmp::min,
     collections::{BTreeMap, HashMap, VecDeque},
+    error::Error,
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use crate::{Order, OrderId, OrderType, Price, Side, Trade, TradeId};
+use crate::{BookLevel, BookSnapshot, Order, OrderId, OrderType, Price, Side, Trade, TradeId};
 
 pub struct OrderBook {
     pub symbol: String,
@@ -16,12 +17,18 @@ pub struct OrderBook {
     next_trade_id: TradeId,
 }
 
-#[derive(Debug, PartialEq)]
+use thiserror::Error;
+
+#[derive(Debug, PartialEq, Error)]
 pub enum BookError {
+    #[error("order id already exists in the book")]
     DuplicateOrderId,
+    #[error("order not found")]
     OrderNotFound,
-    MarketOrderNotAllowed, // in this task; market orders can't rest
-    PriceMisaligned,       // price doesn't fit the tick grid
+    #[error("market orders are not allowed to rest in the book")]
+    MarketOrderNotAllowed,
+    #[error("price does not align with the tick grid")]
+    PriceMisaligned,
 }
 
 #[derive(Debug)]
@@ -223,6 +230,34 @@ impl OrderBook {
             trades,
             resting_order,
         }
+    }
+
+    pub fn snapshot(&self) -> BookSnapshot {
+        // iterate bids (descending) and asks (ascending)
+        // aggregate each price level: price, total qty, order count
+        // return BookSnapshot
+
+        let symbol = self.symbol.clone();
+        let mut bids = Vec::new();
+        let mut asks = Vec::new();
+
+        for (&price, order) in self.asks.iter() {
+            asks.push(BookLevel {
+                price,
+                total_qty: order.iter().map(|qty| qty.remaining_qty).sum(),
+                order_count: order.iter().count(),
+            });
+        }
+
+        for (&price, order) in self.bids.iter().rev() {
+            bids.push(BookLevel {
+                price,
+                total_qty: order.iter().map(|qty| qty.remaining_qty).sum(),
+                order_count: order.iter().count(),
+            });
+        }
+
+        BookSnapshot { symbol, bids, asks }
     }
 }
 

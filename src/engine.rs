@@ -1,11 +1,12 @@
 use tokio::sync::{broadcast, mpsc};
 
-use crate::{Command, CommandResult, Event, OrderBook};
+use crate::{Command, CommandResult, Event, OrderBook, Trade};
 
 pub struct Engine {
     book: OrderBook,
     commands: mpsc::Receiver<Command>,
     events: broadcast::Sender<Event>,
+    recent_trades: Vec<Trade>, // append-only log
 }
 
 impl Engine {
@@ -18,6 +19,7 @@ impl Engine {
             book,
             commands,
             events,
+            recent_trades: Vec::new(),
         }
     }
 
@@ -39,18 +41,26 @@ impl Engine {
 
         match cmd {
             Command::PlaceOrder { order, response } => {
+                let order_id = order.id;
+                let order_clone = order.clone();
+                let _ = self
+                    .events
+                    .send(Event::OrderReceived { order: order_clone });
                 let result = self.book.execute(order);
+
                 if let Some(resting) = result.resting_order {
                     let _ = self.events.send(Event::OrderPlaced { order: resting });
                 }
 
                 for trade in &result.trades {
+                    self.recent_trades.push(trade.clone());
                     let _ = self.events.send(Event::Trade {
                         trade: trade.clone(),
                     });
                 }
 
                 let _ = response.send(CommandResult::Placed {
+                    order_id,
                     trades: result.trades,
                 });
             }
@@ -64,6 +74,15 @@ impl Engine {
                     let _ = response.send(CommandResult::Error(e));
                 }
             },
+
+            Command::GetBook { response } => {
+                let snapshot = self.book.snapshot();
+                let _ = response.send(CommandResult::Book(snapshot));
+            }
+
+            Command::GetTrades { response } => {
+                let _ = response.send(CommandResult::Trades(self.recent_trades.clone()));
+            }
         }
     }
 }

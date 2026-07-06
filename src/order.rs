@@ -1,8 +1,10 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use serde::{Deserialize, Serialize};
+
 use crate::types::{Price, Qty, Side};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 pub enum OrderType {
     Limit,
     Market,
@@ -12,7 +14,7 @@ pub type OrderId = u64;
 pub type ClientId = u64;
 pub type Timestamp = u64; // nanoseconds since UNIX epoch
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Order {
     pub id: OrderId,
     pub client_id: ClientId,
