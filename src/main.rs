@@ -34,6 +34,7 @@ async fn main() {
 
     let state = Arc::new(AppState {
         cmd_tx,
+        evt_tx: evt_tx.clone(),
         tick_decimals: 2,
         next_order_id: AtomicU64::new(1),
     });

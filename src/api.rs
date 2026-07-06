@@ -9,16 +9,19 @@ use std::sync::{
     Arc,
     atomic::{AtomicU64, Ordering},
 };
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{broadcast, mpsc, oneshot};
+
+use crate::ws::ws_handler;
 
 use crate::{
     BookError, BookLevel, BookLevelResponse, BookSnapshot, BookSnapshotResponse, Command,
-    CommandResult, Order, PlaceOrderRequest, PlaceOrderResponse, TradeResponse, format_price,
-    parse_price,
+    CommandResult, Event, Order, PlaceOrderRequest, PlaceOrderResponse, TradeResponse,
+    format_price, parse_price,
 };
 
 pub struct AppState {
     pub cmd_tx: mpsc::Sender<Command>,
+    pub evt_tx: broadcast::Sender<Event>,
     pub tick_decimals: u32,
     pub next_order_id: AtomicU64,
 }
@@ -29,6 +32,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/orders/{id}", delete(cancel_order))
         .route("/book", get(get_book))
         .route("/trades", get(get_trades))
+        .route("/ws", get(ws_handler))
         .with_state(state)
 }
 

@@ -109,7 +109,7 @@ pub struct BookLevel {
     pub order_count: usize,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct BookLevelResponse {
     pub price: String,
     pub total_qty: Qty,
@@ -128,6 +128,28 @@ pub struct BookSnapshot {
     pub symbol: String,
     pub bids: Vec<BookLevel>,
     pub asks: Vec<BookLevel>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type")]
+pub enum WsMessage {
+    Snapshot {
+        bids: Vec<BookLevelResponse>,
+        asks: Vec<BookLevelResponse>,
+    },
+    Trade {
+        id: TradeId,
+        buyer_order_id: OrderId,
+        seller_order_id: OrderId,
+        price: String,
+        qty: Qty,
+    },
+    BookUpdate {
+        side: Side,
+        price: String,
+        total_qty: Qty,
+        order_count: usize,
+    },
 }
 
 pub fn parse_price(s: &str, tick_decimals: u32) -> Result<Price, PriceError> {
